@@ -5,6 +5,7 @@ interface UserFields {
     name: string;
     email: string;
     phone?: string;
+    avatarUrl?: string;
     passwordHash?: string;
     googleId?: string;
     role: "customer" | "admin";
@@ -32,6 +33,11 @@ const userSchema = new Schema<UserFields>(
             type: String,
             trim: true,
             maxlength: 40,
+        },
+        avatarUrl: {
+            type: String,
+            trim: true,
+            maxlength: 500,
         },
         passwordHash: {
             type: String,

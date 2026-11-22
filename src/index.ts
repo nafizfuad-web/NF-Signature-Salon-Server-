@@ -6,34 +6,49 @@ import dotenv from "dotenv";
 import connectDB from "./config/db";
 import { loadServerConfig } from "./config/env";
 import authRoutes from "./routes/authRoutes";
+import serviceRoutes from "./routes/serviceRoutes";
+import appointmentRoutes from "./routes/appointmentRoutes";
+import customerRoutes from "./routes/customerRoutes";
 
-// Resolve .env from the server package, not from whatever directory the
-// process happened to be started in (e.g. the repository root).
+// Load .env from the server package directory.
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const app = express();
 const config = loadServerConfig();
 
+// Safe Google OAuth diagnostic.
+// Never logs the actual Client ID or Client Secret.
+const googleOAuthDiagnostic = {
+    clientId: Boolean(process.env.GOOGLE_CLIENT_ID?.trim()),
+    clientSecret: Boolean(process.env.GOOGLE_CLIENT_SECRET?.trim()),
+    callbackUrl: Boolean(process.env.GOOGLE_CALLBACK_URL?.trim()),
+    configured: Boolean(config.googleOAuth),
+};
+
+console.log("Google OAuth diagnostic:", googleOAuthDiagnostic);
+
 function isLocalDevelopmentOrigin(origin: string): boolean {
     try {
         const parsed = new URL(origin);
+
         return (
             (parsed.hostname === "localhost" ||
                 parsed.hostname === "127.0.0.1") &&
-            (parsed.protocol === "http:" || parsed.protocol === "https:")
+            (parsed.protocol === "http:" ||
+                parsed.protocol === "https:")
         );
     } catch {
         return false;
     }
 }
 
-const hasGoogleOAuthSetting = [
+const hasAnyGoogleOAuthSetting = [
     "GOOGLE_CLIENT_ID",
     "GOOGLE_CLIENT_SECRET",
     "GOOGLE_CALLBACK_URL",
 ].some((name) => Boolean(process.env[name]?.trim()));
 
-if (hasGoogleOAuthSetting && !config.googleOAuth) {
+if (hasAnyGoogleOAuthSetting && !config.googleOAuth) {
     console.warn(
         "Google OAuth is disabled because its required environment variables are incomplete.",
     );
@@ -47,16 +62,27 @@ app.use(
                 origin === config.clientOrigin ||
                 (config.nodeEnv !== "production" &&
                     isLocalDevelopmentOrigin(origin));
+
             callback(null, allowed);
         },
-    })
+    }),
 );
 
 app.disable("x-powered-by");
+
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ extended: false, limit: "16kb" }));
 
-// Health check
+// Serve uploaded profile pictures.
+app.use(
+    "/uploads",
+    express.static(path.resolve(__dirname, "../uploads"), {
+        index: false,
+        maxAge: "1d",
+    }),
+);
+
+// Health check.
 app.get("/", (_req: Request, res: Response) => {
     res.status(200).json({
         success: true,
@@ -65,10 +91,19 @@ app.get("/", (_req: Request, res: Response) => {
     });
 });
 
-// Authentication routes
+// Authentication routes.
 app.use("/api/auth", authRoutes);
 
-// 404 handler
+// Service catalogue.
+app.use("/api/services", serviceRoutes);
+
+// Availability, booking and cancellation.
+app.use("/api/appointments", appointmentRoutes);
+
+// Customer dashboard, appointments, profile and avatar.
+app.use("/api/customers", customerRoutes);
+
+// 404 handler.
 app.use((_req: Request, res: Response) => {
     res.status(404).json({
         success: false,
@@ -76,24 +111,7 @@ app.use((_req: Request, res: Response) => {
     });
 });
 
-const startServer = async (): Promise<void> => {
-    try {
-        await connectDB(config.mongoUri);
-
-        app.listen(config.port, () => {
-            console.log("--------------------------------");
-            console.log("NF Signature Salon API Started");
-            console.log(`Server listening on port ${config.port}`);
-            console.log("--------------------------------");
-        });
-    } catch (error) {
-        console.error("Server startup failed.", {
-            errorName: error instanceof Error ? error.name : "UnknownError",
-        });
-        process.exit(1);
-    }
-};
-
+// Central error handler.
 app.use(
     (
         error: unknown,
@@ -108,20 +126,50 @@ app.use(
 
         const status =
             typeof error === "object" &&
-            error !== null &&
-            "status" in error &&
-            typeof error.status === "number"
+                error !== null &&
+                "status" in error &&
+                typeof error.status === "number"
                 ? error.status
                 : 500;
+
         console.error("Unhandled API error.", {
-            errorName: error instanceof Error ? error.name : "UnknownError",
+            errorName:
+                error instanceof Error
+                    ? error.name
+                    : "UnknownError",
             status,
         });
+
         res.status(status).json({
             success: false,
-            message: status >= 500 ? "An unexpected server error occurred." : "Invalid request.",
+            message:
+                status >= 500
+                    ? "An unexpected server error occurred."
+                    : "Invalid request.",
         });
     },
 );
+
+const startServer = async (): Promise<void> => {
+    try {
+        await connectDB(config.mongoUri);
+
+        app.listen(config.port, () => {
+            console.log("--------------------------------");
+            console.log("NF Signature Salon API Started");
+            console.log(`Server listening on port ${config.port}`);
+            console.log("--------------------------------");
+        });
+    } catch (error) {
+        console.error("Server startup failed.", {
+            errorName:
+                error instanceof Error
+                    ? error.name
+                    : "UnknownError",
+        });
+
+        process.exit(1);
+    }
+};
 
 startServer();

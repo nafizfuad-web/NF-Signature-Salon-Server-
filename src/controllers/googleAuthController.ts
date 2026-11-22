@@ -1,3 +1,4 @@
+
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import type { Request, Response } from "express";
 import { CodeChallengeMethod, OAuth2Client } from "google-auth-library";
@@ -7,6 +8,7 @@ import { createToken, formatUser } from "./authController";
 
 const COOKIE_PATH = "/api/auth/google";
 const COOKIE_MAX_AGE = 5 * 60 * 1000;
+
 const COOKIE_NAMES = [
     "nf_google_state",
     "nf_google_nonce",
@@ -19,20 +21,30 @@ function getCookie(req: Request, name: string): string | undefined {
 
     for (const item of cookieHeader.split(";")) {
         const separator = item.indexOf("=");
-        if (separator < 0 || item.slice(0, separator).trim() !== name) continue;
+
+        if (separator < 0 || item.slice(0, separator).trim() !== name) {
+            continue;
+        }
+
         try {
             return decodeURIComponent(item.slice(separator + 1).trim());
         } catch {
             return undefined;
         }
     }
+
     return undefined;
 }
 
-function matchesSecret(left: string | undefined, right: string | undefined): boolean {
+function matchesSecret(
+    left: string | undefined,
+    right: string | undefined,
+): boolean {
     if (!left || !right) return false;
+
     const leftBuffer = Buffer.from(left);
     const rightBuffer = Buffer.from(right);
+
     return (
         leftBuffer.length === rightBuffer.length &&
         timingSafeEqual(leftBuffer, rightBuffer)
@@ -41,6 +53,7 @@ function matchesSecret(left: string | undefined, right: string | undefined): boo
 
 function clearFlowCookies(res: Response): void {
     const { nodeEnv } = getServerConfig();
+
     for (const name of COOKIE_NAMES) {
         res.clearCookie(name, {
             httpOnly: true,
@@ -61,10 +74,18 @@ function sendPopupResult(
     res: Response,
     status: number,
     message:
-        | { type: "nf-signature-auth"; token: string; user: ReturnType<typeof formatUser> }
-        | { type: "nf-signature-auth"; error: string },
+        | {
+            type: "nf-signature-auth";
+            token: string;
+            user: ReturnType<typeof formatUser>;
+        }
+        | {
+            type: "nf-signature-auth";
+            error: string;
+        },
 ): void {
     const { clientOrigin } = getServerConfig();
+
     const nonce = randomBytes(18).toString("base64");
     const encodedMessage = escapeScriptJson(message);
     const encodedOrigin = escapeScriptJson(clientOrigin);
@@ -73,23 +94,57 @@ function sendPopupResult(
         .set({
             "Cache-Control": "no-store",
             "Content-Security-Policy": `default-src 'none'; script-src 'nonce-${nonce}'; base-uri 'none'; frame-ancestors 'none'`,
-            "Cross-Origin-Opener-Policy": "same-origin-allow-popups",
             "Referrer-Policy": "no-referrer",
             "X-Content-Type-Options": "nosniff",
         })
         .type("html")
         .send(
-            `<!doctype html><html lang="en"><meta charset="utf-8"><title>Google sign-in</title><body><p>Returning to NF Signature Salon…</p><script nonce="${nonce}">if(window.opener){window.opener.postMessage(${encodedMessage},${encodedOrigin});window.close()}</script></body></html>`,
+            `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google sign-in</title>
+</head>
+<body>
+<p>Returning to NF Signature Salon...</p>
+<script nonce="${nonce}">
+(function () {
+    const message = ${encodedMessage};
+    const targetOrigin = ${encodedOrigin};
+
+    if (window.opener && !window.opener.closed) {
+        window.opener.postMessage(message, targetOrigin);
+        window.close();
+    } else {
+        document.body.innerHTML =
+            "<p>Unable to return to the salon website. Please close this window and try signing in again.</p>";
+    }
+})();
+</script>
+</body>
+</html>`,
         );
 }
 
-function sendGoogleError(res: Response, status: number, error: string): void {
+function sendGoogleError(
+    res: Response,
+    status: number,
+    error: string,
+): void {
     clearFlowCookies(res);
-    sendPopupResult(res, status, { type: "nf-signature-auth", error });
+    sendPopupResult(res, status, {
+        type: "nf-signature-auth",
+        error,
+    });
 }
 
-export async function startGoogleAuth(_req: Request, res: Response): Promise<void> {
+export async function startGoogleAuth(
+    _req: Request,
+    res: Response,
+): Promise<void> {
     const { googleOAuth, nodeEnv } = getServerConfig();
+
     if (!googleOAuth) {
         sendGoogleError(
             res,
@@ -104,14 +159,22 @@ export async function startGoogleAuth(_req: Request, res: Response): Promise<voi
         googleOAuth.clientSecret,
         googleOAuth.callbackUrl,
     );
+
     const state = randomBytes(32).toString("base64url");
     const nonce = randomBytes(32).toString("base64url");
+
     const { codeVerifier, codeChallenge } =
         await oauthClient.generateCodeVerifierAsync();
+
     if (!codeChallenge) {
-        sendGoogleError(res, 500, "Google sign-in could not be started.");
+        sendGoogleError(
+            res,
+            500,
+            "Google sign-in could not be started.",
+        );
         return;
     }
+
     const cookieOptions = {
         httpOnly: true,
         sameSite: "lax" as const,
@@ -133,11 +196,16 @@ export async function startGoogleAuth(_req: Request, res: Response): Promise<voi
         code_challenge: codeChallenge,
         code_challenge_method: CodeChallengeMethod.S256,
     });
+
     res.redirect(302, authorizationUrl);
 }
 
-export async function completeGoogleAuth(req: Request, res: Response): Promise<void> {
+export async function completeGoogleAuth(
+    req: Request,
+    res: Response,
+): Promise<void> {
     const { googleOAuth } = getServerConfig();
+
     if (!googleOAuth) {
         sendGoogleError(
             res,
@@ -147,23 +215,40 @@ export async function completeGoogleAuth(req: Request, res: Response): Promise<v
         return;
     }
 
-    const state = typeof req.query.state === "string" ? req.query.state : undefined;
-    const code = typeof req.query.code === "string" ? req.query.code : undefined;
+    const state =
+        typeof req.query.state === "string"
+            ? req.query.state
+            : undefined;
+
+    const code =
+        typeof req.query.code === "string"
+            ? req.query.code
+            : undefined;
+
     const storedState = getCookie(req, "nf_google_state");
     const storedNonce = getCookie(req, "nf_google_nonce");
     const codeVerifier = getCookie(req, "nf_google_verifier");
 
     if (typeof req.query.error === "string") {
-        sendGoogleError(res, 400, "Google sign-in was cancelled or denied.");
+        sendGoogleError(
+            res,
+            400,
+            "Google sign-in was cancelled or denied.",
+        );
         return;
     }
+
     if (
         !matchesSecret(state, storedState) ||
         !storedNonce ||
         !codeVerifier ||
         !code
     ) {
-        sendGoogleError(res, 400, "Google sign-in could not be verified.");
+        sendGoogleError(
+            res,
+            400,
+            "Google sign-in could not be verified.",
+        );
         return;
     }
 
@@ -175,7 +260,12 @@ export async function completeGoogleAuth(req: Request, res: Response): Promise<v
             googleOAuth.clientSecret,
             googleOAuth.callbackUrl,
         );
-        const { tokens } = await oauthClient.getToken({ code, codeVerifier });
+
+        const { tokens } = await oauthClient.getToken({
+            code,
+            codeVerifier,
+        });
+
         if (!tokens.id_token) {
             sendPopupResult(res, 400, {
                 type: "nf-signature-auth",
@@ -188,7 +278,9 @@ export async function completeGoogleAuth(req: Request, res: Response): Promise<v
             idToken: tokens.id_token,
             audience: googleOAuth.clientId,
         });
+
         const identity = ticket.getPayload();
+
         if (
             !identity?.sub ||
             !identity.email ||
@@ -205,45 +297,74 @@ export async function completeGoogleAuth(req: Request, res: Response): Promise<v
         const email = identity.email.trim().toLowerCase();
         const preferredName = identity.name?.trim();
         const fallbackName = email.split("@")[0];
+
         const name =
             preferredName && preferredName.length <= 100
                 ? preferredName
-                : fallbackName && fallbackName.length >= 2 && fallbackName.length <= 100
-                  ? fallbackName
-                  : "Google user";
-        let user = await User.findOne({ googleId: identity.sub });
+                : fallbackName &&
+                    fallbackName.length >= 2 &&
+                    fallbackName.length <= 100
+                    ? fallbackName
+                    : "Google user";
+
+        let user = await User.findOne({
+            googleId: identity.sub,
+        });
 
         if (!user) {
-            const existingEmail = await User.findOne({ email });
-            if (existingEmail) {
-                sendPopupResult(res, 409, {
-                    type: "nf-signature-auth",
-                    error: "An account with this email already exists. Sign in with email and password.",
-                });
-                return;
-            }
+            const existingEmail = await User.findOne({
+                email,
+            }).select("+googleId");
 
-            try {
-                user = await User.create({
-                    name,
-                    email,
-                    googleId: identity.sub,
-                    role: "customer",
-                });
-            } catch (error) {
+            if (existingEmail) {
                 if (
-                    typeof error === "object" &&
-                    error !== null &&
-                    "code" in error &&
-                    error.code === 11000
+                    existingEmail.googleId &&
+                    existingEmail.googleId !== identity.sub
                 ) {
                     sendPopupResult(res, 409, {
                         type: "nf-signature-auth",
-                        error: "An account with this email already exists.",
+                        error:
+                            "This email is linked to a different Google account. Sign in with email and password instead.",
                     });
                     return;
                 }
-                throw error;
+
+                existingEmail.googleId = identity.sub;
+
+                if (!existingEmail.avatarUrl && identity.picture) {
+                    existingEmail.avatarUrl = identity.picture;
+                }
+
+                await existingEmail.save();
+                user = existingEmail;
+            } else {
+                try {
+                    user = await User.create({
+                        name,
+                        email,
+                        googleId: identity.sub,
+                        role: "customer",
+                        ...(identity.picture
+                            ? { avatarUrl: identity.picture }
+                            : {}),
+                    });
+                } catch (error) {
+                    if (
+                        typeof error === "object" &&
+                        error !== null &&
+                        "code" in error &&
+                        error.code === 11000
+                    ) {
+                        sendPopupResult(res, 409, {
+                            type: "nf-signature-auth",
+                            error:
+                                "An account with this email already exists.",
+                        });
+                        return;
+                    }
+
+                    throw error;
+                }
             }
         }
 
@@ -254,11 +375,16 @@ export async function completeGoogleAuth(req: Request, res: Response): Promise<v
         });
     } catch (error) {
         console.error("Google sign-in failed.", {
-            errorName: error instanceof Error ? error.name : "UnknownError",
+            errorName:
+                error instanceof Error
+                    ? error.name
+                    : "UnknownError",
         });
+
         sendPopupResult(res, 500, {
             type: "nf-signature-auth",
-            error: "Google sign-in could not be completed. Please try again.",
+            error:
+                "Google sign-in could not be completed. Please try again.",
         });
     }
 }

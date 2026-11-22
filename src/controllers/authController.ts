@@ -19,6 +19,7 @@ export const formatUser = (user: {
     name: string;
     email: string;
     phone?: string;
+    avatarUrl?: string;
     role: "customer" | "admin";
     createdAt?: Date;
 }) => ({
@@ -26,6 +27,7 @@ export const formatUser = (user: {
     name: user.name,
     email: user.email,
     ...(user.phone ? { phone: user.phone } : {}),
+    ...(user.avatarUrl ? { avatarUrl: user.avatarUrl } : {}),
     role: user.role,
     ...(user.createdAt ? { createdAt: user.createdAt.toISOString() } : {}),
 });
