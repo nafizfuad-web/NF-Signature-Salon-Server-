@@ -1,33 +1,67 @@
 
+import path from "node:path";
 import express, { type Request, type Response } from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import connectDB from "./config/db";
+import { loadServerConfig } from "./config/env";
 import authRoutes from "./routes/authRoutes";
 
-dotenv.config();
+// Resolve .env from the server package, not from whatever directory the
+// process happened to be started in (e.g. the repository root).
+dotenv.config({ path: path.resolve(__dirname, "../.env") });
 
 const app = express();
+const config = loadServerConfig();
 
-const PORT = Number(process.env.PORT) || 5000;
-const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+function isLocalDevelopmentOrigin(origin: string): boolean {
+    try {
+        const parsed = new URL(origin);
+        return (
+            (parsed.hostname === "localhost" ||
+                parsed.hostname === "127.0.0.1") &&
+            (parsed.protocol === "http:" || parsed.protocol === "https:")
+        );
+    } catch {
+        return false;
+    }
+}
+
+const hasGoogleOAuthSetting = [
+    "GOOGLE_CLIENT_ID",
+    "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_CALLBACK_URL",
+].some((name) => Boolean(process.env[name]?.trim()));
+
+if (hasGoogleOAuthSetting && !config.googleOAuth) {
+    console.warn(
+        "Google OAuth is disabled because its required environment variables are incomplete.",
+    );
+}
 
 app.use(
     cors({
-        origin: CLIENT_URL,
-        credentials: true,
+        origin: (origin, callback) => {
+            const allowed =
+                !origin ||
+                origin === config.clientOrigin ||
+                (config.nodeEnv !== "production" &&
+                    isLocalDevelopmentOrigin(origin));
+            callback(null, allowed);
+        },
     })
 );
 
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+app.disable("x-powered-by");
+app.use(express.json({ limit: "16kb" }));
+app.use(express.urlencoded({ extended: false, limit: "16kb" }));
 
 // Health check
 app.get("/", (_req: Request, res: Response) => {
     res.status(200).json({
         success: true,
         message: "NF Signature Salon API is running!",
-        environment: process.env.NODE_ENV || "development",
+        environment: config.nodeEnv,
     });
 });
 
@@ -44,19 +78,50 @@ app.use((_req: Request, res: Response) => {
 
 const startServer = async (): Promise<void> => {
     try {
-        await connectDB();
+        await connectDB(config.mongoUri);
 
-        app.listen(PORT, () => {
+        app.listen(config.port, () => {
             console.log("--------------------------------");
             console.log("NF Signature Salon API Started");
-            console.log(`Server: http://localhost:${PORT}`);
-            console.log(`Client: ${CLIENT_URL}`);
+            console.log(`Server listening on port ${config.port}`);
             console.log("--------------------------------");
         });
     } catch (error) {
-        console.error("Server startup failed:", error);
+        console.error("Server startup failed.", {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+        });
         process.exit(1);
     }
 };
+
+app.use(
+    (
+        error: unknown,
+        _req: Request,
+        res: Response,
+        next: (error?: unknown) => void,
+    ) => {
+        if (res.headersSent) {
+            next(error);
+            return;
+        }
+
+        const status =
+            typeof error === "object" &&
+            error !== null &&
+            "status" in error &&
+            typeof error.status === "number"
+                ? error.status
+                : 500;
+        console.error("Unhandled API error.", {
+            errorName: error instanceof Error ? error.name : "UnknownError",
+            status,
+        });
+        res.status(status).json({
+            success: false,
+            message: status >= 500 ? "An unexpected server error occurred." : "Invalid request.",
+        });
+    },
+);
 
 startServer();

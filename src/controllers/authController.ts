@@ -1,21 +1,20 @@
 
 import type { Request, Response } from "express";
+import mongoose from "mongoose";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import User from "../models/User";
 import type { AuthRequest } from "../middleware/authMiddleware";
+import { getServerConfig } from "../config/env";
 
-const createToken = (userId: string): string => {
-    const secret = process.env.JWT_SECRET;
-
-    if (!secret) {
-        throw new Error("JWT_SECRET is not configured.");
-    }
-
-    return jwt.sign({ userId }, secret, { expiresIn: "7d" });
+export const createToken = (userId: string): string => {
+    return jwt.sign({ userId }, getServerConfig().jwtSecret, {
+        expiresIn: "7d",
+        algorithm: "HS256",
+    });
 };
 
-const formatUser = (user: {
+export const formatUser = (user: {
     _id: unknown;
     name: string;
     email: string;
@@ -31,10 +30,40 @@ const formatUser = (user: {
     ...(user.createdAt ? { createdAt: user.createdAt.toISOString() } : {}),
 });
 
+function getRequestBody(value: unknown): Record<string, unknown> | null {
+    if (!value || typeof value !== "object" || Array.isArray(value)) {
+        return null;
+    }
+    return value as Record<string, unknown>;
+}
+
+function isDuplicateEmailError(error: unknown): boolean {
+    return (
+        typeof error === "object" &&
+        error !== null &&
+        "code" in error &&
+        error.code === 11000
+    );
+}
+
+function logAuthError(action: string, error: unknown): void {
+    console.error(action, {
+        errorName: error instanceof Error ? error.name : "UnknownError",
+        ...(isDuplicateEmailError(error) ? { databaseCode: 11000 } : {}),
+    });
+}
+
 // REGISTER
 export const register = async (req: Request, res: Response) => {
     try {
-        const { name, email, phone, password } = req.body;
+        const body = getRequestBody(req.body);
+        if (!body) {
+            return res.status(400).json({
+                success: false,
+                message: "A valid JSON object is required.",
+            });
+        }
+        const { name, email, phone, password } = body;
 
         if (
             typeof name !== "string" ||
@@ -57,7 +86,10 @@ export const register = async (req: Request, res: Response) => {
             });
         }
 
-        if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)) {
+        if (
+            cleanEmail.length > 254 ||
+            !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanEmail)
+        ) {
             return res.status(400).json({
                 success: false,
                 message: "Please enter a valid email address.",
@@ -66,20 +98,22 @@ export const register = async (req: Request, res: Response) => {
 
         if (
             password.length < 8 ||
-            password.length > 128 ||
+            Buffer.byteLength(password, "utf8") > 72 ||
             !/[A-Za-z]/.test(password) ||
             !/\d/.test(password)
         ) {
             return res.status(400).json({
                 success: false,
-                message: "Password must be 8-128 characters and include a letter and a number.",
+                message: "Password must be 8-72 bytes and include a letter and a number.",
             });
         }
 
         if (
             phone !== undefined &&
             (typeof phone !== "string" ||
-                phone.trim().replace(/[^\d]/g, "").length < 7)
+                (phone.trim() !== "" &&
+                    (phone.trim().replace(/[^\d]/g, "").length < 7 ||
+                        phone.trim().replace(/[^\d]/g, "").length > 15)))
         ) {
             return res.status(400).json({
                 success: false,
@@ -92,7 +126,7 @@ export const register = async (req: Request, res: Response) => {
         if (existingUser) {
             return res.status(409).json({
                 success: false,
-                message: "An account with this email already exists.",
+                message: "An account with this email already exists. Please sign in instead.",
             });
         }
 
@@ -116,17 +150,17 @@ export const register = async (req: Request, res: Response) => {
             user: formatUser(user),
         });
     } catch (error) {
-        console.error("Registration error:", error);
-
-        if (
-            typeof error === "object" &&
-            error !== null &&
-            "code" in error &&
-            error.code === 11000
-        ) {
+        logAuthError("Registration failed.", error);
+        if (isDuplicateEmailError(error)) {
             return res.status(409).json({
                 success: false,
-                message: "An account with this email already exists.",
+                message: "An account with this email already exists. Please sign in instead.",
+            });
+        }
+        if (error instanceof mongoose.Error.ValidationError) {
+            return res.status(400).json({
+                success: false,
+                message: "Please check your account details and try again.",
             });
         }
 
@@ -140,17 +174,26 @@ export const register = async (req: Request, res: Response) => {
 // LOGIN
 export const login = async (req: Request, res: Response) => {
     try {
-        const { email, password } = req.body;
+        const body = getRequestBody(req.body);
+        if (!body) {
+            return res.status(400).json({
+                success: false,
+                message: "A valid JSON object is required.",
+            });
+        }
+        const { email, password } = body;
 
         if (
             typeof email !== "string" ||
             typeof password !== "string" ||
             !email.trim() ||
-            !password
+            email.trim().length > 254 ||
+            !password ||
+            Buffer.byteLength(password, "utf8") > 72
         ) {
             return res.status(400).json({
                 success: false,
-                message: "Email and password are required.",
+                message: "A valid email address and password are required.",
             });
         }
 
@@ -158,7 +201,7 @@ export const login = async (req: Request, res: Response) => {
             email: email.trim().toLowerCase(),
         }).select("+passwordHash");
 
-        if (!user) {
+        if (!user?.passwordHash) {
             return res.status(401).json({
                 success: false,
                 message: "Invalid email or password.",
@@ -185,7 +228,7 @@ export const login = async (req: Request, res: Response) => {
             user: formatUser(user),
         });
     } catch (error) {
-        console.error("Login error:", error);
+        logAuthError("Login failed.", error);
 
         return res.status(500).json({
             success: false,
@@ -211,7 +254,7 @@ export const getMe = async (req: AuthRequest, res: Response) => {
             user: formatUser(user),
         });
     } catch (error) {
-        console.error("Get current user error:", error);
+        logAuthError("Current-user request failed.", error);
 
         return res.status(500).json({
             success: false,

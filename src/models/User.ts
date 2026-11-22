@@ -5,7 +5,8 @@ interface UserFields {
     name: string;
     email: string;
     phone?: string;
-    passwordHash: string;
+    passwordHash?: string;
+    googleId?: string;
     role: "customer" | "admin";
 }
 
@@ -24,14 +25,22 @@ const userSchema = new Schema<UserFields>(
             unique: true,
             lowercase: true,
             trim: true,
+            maxlength: 254,
+            match: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
         },
         phone: {
             type: String,
             trim: true,
+            maxlength: 40,
         },
         passwordHash: {
             type: String,
-            required: true,
+            select: false,
+        },
+        googleId: {
+            type: String,
+            unique: true,
+            sparse: true,
             select: false,
         },
         role: {
