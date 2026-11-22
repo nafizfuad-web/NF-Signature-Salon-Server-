@@ -9,6 +9,9 @@ import authRoutes from "./routes/authRoutes";
 import serviceRoutes from "./routes/serviceRoutes";
 import appointmentRoutes from "./routes/appointmentRoutes";
 import customerRoutes from "./routes/customerRoutes";
+import paymentRoutes from "./routes/paymentRoutes";
+import adminRoutes from "./routes/adminRoutes";
+import { startPaymentReconciler } from "./lib/paymentReconciliation";
 
 // Load .env from the server package directory.
 dotenv.config({ path: path.resolve(__dirname, "../.env") });
@@ -103,6 +106,10 @@ app.use("/api/appointments", appointmentRoutes);
 // Customer dashboard, appointments, profile and avatar.
 app.use("/api/customers", customerRoutes);
 
+// TEST-only simulated payments.
+app.use("/api/payments", paymentRoutes);
+app.use("/api/admin", adminRoutes);
+
 // 404 handler.
 app.use((_req: Request, res: Response) => {
     res.status(404).json({
@@ -153,6 +160,7 @@ app.use(
 const startServer = async (): Promise<void> => {
     try {
         await connectDB(config.mongoUri);
+        startPaymentReconciler();
 
         app.listen(config.port, () => {
             console.log("--------------------------------");

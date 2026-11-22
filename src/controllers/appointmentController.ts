@@ -6,6 +6,7 @@
 import type { Response } from "express";
 import Appointment from "../models/Appointment";
 import Service from "../models/Service";
+import Transaction, { ACTIVE_PAYMENT_STATUSES } from "../models/Transaction";
 import User from "../models/User";
 import type { AuthRequest } from "../middleware/authMiddleware";
 import {
@@ -269,8 +270,25 @@ export async function cancelAppointment(req: AuthRequest, res: Response): Promis
             return;
         }
 
-        if (appointment.status !== "pending" && appointment.status !== "confirmed") {
-            fail(res, 409, "This appointment can no longer be cancelled.");
+        if (
+            appointment.status !== "pending" &&
+            appointment.status !== "confirmed"
+        ) {
+            fail(res, 409, "Only pending or confirmed appointments can be cancelled online.");
+            return;
+        }
+
+        if ((appointment.paymentStatus ?? "unpaid") !== "unpaid") {
+            fail(res, 409, "This appointment has a payment in progress or is already paid.");
+            return;
+        }
+
+        const activePayment = await Transaction.exists({
+            appointment: appointment._id,
+            paymentStatus: { $in: [...ACTIVE_PAYMENT_STATUSES] },
+        });
+        if (activePayment) {
+            fail(res, 409, "This appointment has a payment in progress and cannot be cancelled.");
             return;
         }
 

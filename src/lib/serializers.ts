@@ -32,6 +32,10 @@ export interface AppointmentLike {
     customerName?: string;
     customerEmail?: string;
     customerPhone?: string;
+    paymentStatus?: string;
+    paymentMethod?: string;
+    paidAt?: Date;
+    latestTransactionId?: unknown;
     createdAt?: Date;
 }
 
@@ -69,8 +73,78 @@ export function formatAppointment(appointment: AppointmentLike) {
         ...(appointment.customerName ? { customerName: appointment.customerName } : {}),
         ...(appointment.customerEmail ? { customerEmail: appointment.customerEmail } : {}),
         ...(appointment.customerPhone ? { customerPhone: appointment.customerPhone } : {}),
+        paymentStatus: appointment.paymentStatus ?? "unpaid",
+        ...(appointment.paymentMethod ? { paymentMethod: appointment.paymentMethod } : {}),
+        ...(appointment.paidAt instanceof Date
+            ? { paidAt: appointment.paidAt.toISOString() }
+            : {}),
+        ...(appointment.latestTransactionId
+            ? { latestTransactionId: String(appointment.latestTransactionId) }
+            : {}),
         ...(appointment.createdAt instanceof Date
             ? { createdAt: appointment.createdAt.toISOString() }
+            : {}),
+    };
+}
+
+export interface TransactionLike {
+    _id: unknown;
+    appointment: unknown;
+    customer: unknown;
+    service?: unknown;
+    serviceTitle: string;
+    appointmentDate: string;
+    appointmentTime: string;
+    displayPrice?: string;
+    amount: number;
+    currency: string;
+    amountBasis: string;
+    paymentMethod: string;
+    provider: string;
+    paymentStatus: string;
+    environment: string;
+    simulated: boolean;
+    simulationOutcome?: string;
+    failureReason?: string;
+    paidAt?: Date;
+    cashConfirmedAt?: Date;
+    createdAt?: Date;
+    updatedAt?: Date;
+}
+
+export function formatTransaction(transaction: TransactionLike) {
+    return {
+        id: String(transaction._id),
+        appointmentId: String(transaction.appointment),
+        customerId: String(transaction.customer),
+        ...(transaction.service ? { serviceId: String(transaction.service) } : {}),
+        serviceTitle: transaction.serviceTitle,
+        appointmentDate: transaction.appointmentDate,
+        appointmentTime: transaction.appointmentTime,
+        ...(transaction.displayPrice ? { displayPrice: transaction.displayPrice } : {}),
+        amount: transaction.amount,
+        currency: transaction.currency,
+        amountBasis: transaction.amountBasis,
+        paymentMethod: transaction.paymentMethod,
+        provider: transaction.provider,
+        paymentStatus: transaction.paymentStatus,
+        environment: transaction.environment,
+        simulated: transaction.simulated,
+        ...(transaction.simulationOutcome
+            ? { simulationOutcome: transaction.simulationOutcome }
+            : {}),
+        ...(transaction.failureReason ? { failureReason: transaction.failureReason } : {}),
+        ...(transaction.paidAt instanceof Date
+            ? { paidAt: transaction.paidAt.toISOString() }
+            : {}),
+        ...(transaction.cashConfirmedAt instanceof Date
+            ? { cashConfirmedAt: transaction.cashConfirmedAt.toISOString() }
+            : {}),
+        ...(transaction.createdAt instanceof Date
+            ? { createdAt: transaction.createdAt.toISOString() }
+            : {}),
+        ...(transaction.updatedAt instanceof Date
+            ? { updatedAt: transaction.updatedAt.toISOString() }
             : {}),
     };
 }

@@ -5,6 +5,10 @@
 // index prevents two active appointments from starting at the same minute.
 
 import mongoose, { Schema, type Model, type Types } from "mongoose";
+import {
+    PAYMENT_METHOD_IDS,
+    type PaymentMethodId,
+} from "../config/payment";
 
 export const APPOINTMENT_STATUSES = [
     "pending",
@@ -32,6 +36,10 @@ export interface AppointmentFields {
     customerName: string;
     customerEmail: string;
     customerPhone?: string;
+    paymentStatus?: "unpaid" | "pending" | "paid";
+    paymentMethod?: PaymentMethodId;
+    paidAt?: Date;
+    latestTransactionId?: Types.ObjectId;
 }
 
 const appointmentSchema = new Schema<AppointmentFields>(
@@ -132,6 +140,21 @@ const appointmentSchema = new Schema<AppointmentFields>(
             type: String,
             trim: true,
             maxlength: 40,
+        },
+        paymentStatus: {
+            type: String,
+            enum: ["unpaid", "pending", "paid"],
+        },
+        paymentMethod: {
+            type: String,
+            enum: PAYMENT_METHOD_IDS,
+        },
+        paidAt: {
+            type: Date,
+        },
+        latestTransactionId: {
+            type: Schema.Types.ObjectId,
+            ref: "Transaction",
         },
     },
     { timestamps: true, versionKey: false },
