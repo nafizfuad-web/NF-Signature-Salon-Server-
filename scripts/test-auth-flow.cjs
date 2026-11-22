@@ -18,6 +18,7 @@ const crypto = require('node:crypto')
 const mongoose = require('mongoose')
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true })
+const { getTestMongoUri } = require('./lib/testDb.cjs')
 
 const BASE_URL = (
   process.env.AUTH_TEST_BASE_URL || 'http://localhost:5000/api'
@@ -64,9 +65,10 @@ async function request(method, route, { body, token } = {}) {
 }
 
 async function deleteThrowawayUser(userId) {
-  if (!userId || !process.env.MONGODB_URI) return
+  if (!userId) return
+  const uri = getTestMongoUri()
   try {
-    await mongoose.connect(process.env.MONGODB_URI)
+    await mongoose.connect(uri)
     const result = await mongoose.connection.db
       .collection('users')
       .deleteOne({ _id: new mongoose.Types.ObjectId(userId) })
@@ -87,6 +89,8 @@ async function main() {
     console.error('This test requires Node.js 18 or newer (global fetch).')
     process.exit(1)
   }
+
+  getTestMongoUri()
 
   const email = randomEmail()
   const password = randomPassword()

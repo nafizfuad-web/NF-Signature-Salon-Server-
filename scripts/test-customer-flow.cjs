@@ -18,6 +18,7 @@ const fs = require('node:fs')
 const mongoose = require('mongoose')
 
 require('dotenv').config({ path: path.join(__dirname, '..', '.env'), quiet: true })
+const { getTestMongoUri } = require('./lib/testDb.cjs')
 
 const API_BASE = (
   process.env.TEST_API_BASE_URL || 'http://localhost:5000/api'
@@ -97,29 +98,27 @@ async function registerUser(prefix) {
 }
 
 async function cleanup(state) {
-  if (process.env.MONGODB_URI) {
-    try {
-      await mongoose.connect(process.env.MONGODB_URI)
-      const db = mongoose.connection.db
-      if (state.appointmentIds.length) {
-        await db
-          .collection('appointments')
-          .deleteMany({ _id: { $in: state.appointmentIds.map((id) => new mongoose.Types.ObjectId(id)) } })
-      }
-      if (state.userIds.length) {
-        await db.collection('appointments').deleteMany({
-          customer: { $in: state.userIds.map((id) => new mongoose.Types.ObjectId(id)) },
-        })
-        await db.collection('users').deleteMany({
-          _id: { $in: state.userIds.map((id) => new mongoose.Types.ObjectId(id)) },
-        })
-      }
-      console.log('INFO  throwaway accounts and appointments removed')
-    } catch (error) {
-      console.log(`WARN  cleanup failed (${error.name})`)
-    } finally {
-      await mongoose.disconnect().catch(() => {})
+  try {
+    await mongoose.connect(getTestMongoUri())
+    const db = mongoose.connection.db
+    if (state.appointmentIds.length) {
+      await db
+        .collection('appointments')
+        .deleteMany({ _id: { $in: state.appointmentIds.map((id) => new mongoose.Types.ObjectId(id)) } })
     }
+    if (state.userIds.length) {
+      await db.collection('appointments').deleteMany({
+        customer: { $in: state.userIds.map((id) => new mongoose.Types.ObjectId(id)) },
+      })
+      await db.collection('users').deleteMany({
+        _id: { $in: state.userIds.map((id) => new mongoose.Types.ObjectId(id)) },
+      })
+    }
+    console.log('INFO  throwaway accounts and appointments removed')
+  } catch (error) {
+    console.log(`WARN  cleanup failed (${error.name})`)
+  } finally {
+    await mongoose.disconnect().catch(() => {})
   }
 
   for (const url of state.avatarUrls) {
@@ -141,6 +140,7 @@ async function main() {
 
   const state = { userIds: [], appointmentIds: [], avatarUrls: [] }
   const date = dateString(1)
+  getTestMongoUri()
 
   try {
     console.log(`Target API: ${API_BASE}`)
