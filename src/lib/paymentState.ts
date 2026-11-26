@@ -15,6 +15,14 @@ import Transaction, {
 } from "../models/Transaction";
 import type { PaymentMethodId } from "../config/payment";
 
+/**
+ * Where a settlement decision comes from:
+ * - simulated: the internal TEST simulator (never real money)
+ * - stripe: a Stripe-verified checkout/webhook result
+ * - cash: an admin-confirmed Pay at Salon cash collection
+ */
+export type SettlementSource = "simulated" | "stripe" | "cash";
+
 export type TransactionLean = TransactionFields & {
     _id: Types.ObjectId;
     createdAt?: Date;
@@ -176,11 +184,20 @@ function assertTransactionSettleable(
         settlementOutcome: SimulationOutcome;
     },
 ): void {
-    if (transaction.environment !== "TEST" || transaction.simulated !== true) {
+    const isTestSimulated =
+        transaction.environment === "TEST" && transaction.simulated === true;
+    const isVerifiedProviderTest =
+        ["stripe", "bkash", "nagad"].includes(transaction.provider) &&
+        transaction.environment === "TEST" &&
+        transaction.simulated === false &&
+        options.finalStatus === "succeeded" &&
+        options.requireMethod === transaction.paymentMethod &&
+        transaction.providerVerifiedAt instanceof Date;
+    if (!isTestSimulated && !isVerifiedProviderTest) {
         throw new PaymentStateError(
             409,
             "test_payments_only",
-            "Only TEST simulated payments can be settled in this phase.",
+            "Only TEST payments can be settled in this phase.",
         );
     }
     if (

@@ -24,6 +24,7 @@ export interface AppointmentLike {
     category?: string;
     duration?: string;
     price?: string;
+    priceAmount?: number;
     date: string;
     time: string;
     status: string;
@@ -67,6 +68,7 @@ export function formatAppointment(appointment: AppointmentLike) {
         time: appointment.time,
         ...(appointment.duration ? { duration: appointment.duration } : {}),
         ...(appointment.price ? { price: appointment.price } : {}),
+        ...(appointment.priceAmount ? { priceAmount: appointment.priceAmount } : {}),
         status: appointment.status,
         ...(appointment.staffName ? { staffName: appointment.staffName } : {}),
         ...(appointment.notes ? { notes: appointment.notes } : {}),
@@ -101,12 +103,22 @@ export interface TransactionLike {
     amountBasis: string;
     paymentMethod: string;
     provider: string;
+    providerReference?: string;
+    providerEventId?: string;
+    refundReason?: string;
     paymentStatus: string;
     environment: string;
     simulated: boolean;
     simulationOutcome?: string;
     failureReason?: string;
+    checkoutUrl?: string;
+    providerSessionId?: string;
+    providerPaymentIntentId?: string;
+    providerVerifiedAt?: Date;
+    refundedAmount?: number;
+    refundedAt?: Date;
     paidAt?: Date;
+    cashConfirmedBy?: unknown;
     cashConfirmedAt?: Date;
     createdAt?: Date;
     updatedAt?: Date;
@@ -127,6 +139,13 @@ export function formatTransaction(transaction: TransactionLike) {
         amountBasis: transaction.amountBasis,
         paymentMethod: transaction.paymentMethod,
         provider: transaction.provider,
+        providerReference: transaction.providerReference,
+        ...(transaction.providerEventId
+            ? { providerEventId: transaction.providerEventId }
+            : {}),
+        ...(transaction.refundReason
+            ? { refundReason: transaction.refundReason }
+            : {}),
         paymentStatus: transaction.paymentStatus,
         environment: transaction.environment,
         simulated: transaction.simulated,
@@ -134,8 +153,27 @@ export function formatTransaction(transaction: TransactionLike) {
             ? { simulationOutcome: transaction.simulationOutcome }
             : {}),
         ...(transaction.failureReason ? { failureReason: transaction.failureReason } : {}),
+        ...(transaction.checkoutUrl ? { checkoutUrl: transaction.checkoutUrl } : {}),
+        ...(transaction.providerSessionId
+            ? { providerSessionId: transaction.providerSessionId }
+            : {}),
+        ...(transaction.providerPaymentIntentId
+            ? { providerPaymentIntentId: transaction.providerPaymentIntentId }
+            : {}),
+        ...(transaction.providerVerifiedAt instanceof Date
+            ? { providerVerifiedAt: transaction.providerVerifiedAt.toISOString() }
+            : {}),
+        ...(transaction.refundedAmount !== undefined
+            ? { refundedAmount: transaction.refundedAmount }
+            : {}),
+        ...(transaction.refundedAt instanceof Date
+            ? { refundedAt: transaction.refundedAt.toISOString() }
+            : {}),
         ...(transaction.paidAt instanceof Date
             ? { paidAt: transaction.paidAt.toISOString() }
+            : {}),
+        ...(transaction.cashConfirmedBy
+            ? { cashConfirmedBy: String(transaction.cashConfirmedBy) }
             : {}),
         ...(transaction.cashConfirmedAt instanceof Date
             ? { cashConfirmedAt: transaction.cashConfirmedAt.toISOString() }

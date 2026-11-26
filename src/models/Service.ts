@@ -3,7 +3,7 @@
 // Services are seeded into MongoDB (see scripts/seed-services.cjs) and read by
 // the public catalogue endpoints. The admin UI is out of scope for this phase.
 
-import mongoose, { Schema, type Model } from "mongoose";
+import mongoose, { Schema, type Model, type Types } from "mongoose";
 
 export const SERVICE_CATEGORIES = ["hair", "skin", "nails", "wellness"] as const;
 export type ServiceCategory = (typeof SERVICE_CATEGORIES)[number];
@@ -13,6 +13,8 @@ export interface ServiceFields {
     description: string;
     longDescription?: string;
     price: string;
+    /** Chargeable amount in whole BDT used by real payment methods. */
+    priceAmount?: number;
     duration?: string;
     category: ServiceCategory;
     image?: string;
@@ -20,6 +22,8 @@ export interface ServiceFields {
     includes: string[];
     goodToKnow: string[];
     active: boolean;
+    createdBy?: Types.ObjectId;
+    updatedBy?: Types.ObjectId;
 }
 
 const serviceSchema = new Schema<ServiceFields>(
@@ -46,6 +50,15 @@ const serviceSchema = new Schema<ServiceFields>(
             required: true,
             trim: true,
             maxlength: 40,
+        },
+        priceAmount: {
+            type: Number,
+            min: 1,
+            max: 10_000_000,
+            validate: {
+                validator: (value: number) => Number.isInteger(value),
+                message: "priceAmount must be a whole BDT amount.",
+            },
         },
         duration: {
             type: String,
@@ -79,6 +92,14 @@ const serviceSchema = new Schema<ServiceFields>(
             type: Boolean,
             default: true,
             index: true,
+        },
+        createdBy: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
+        },
+        updatedBy: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
         },
     },
     { timestamps: true, versionKey: false },

@@ -10,6 +10,8 @@ import serviceRoutes from "./routes/serviceRoutes";
 import appointmentRoutes from "./routes/appointmentRoutes";
 import customerRoutes from "./routes/customerRoutes";
 import paymentRoutes from "./routes/paymentRoutes";
+import stripeSessionRoutes, { stripeWebhook } from "./routes/stripeRoutes";
+import bkashRoutes from "./routes/bkashRoutes";
 import adminRoutes from "./routes/adminRoutes";
 import { startPaymentReconciler } from "./lib/paymentReconciliation";
 
@@ -73,8 +75,20 @@ app.use(
 
 app.disable("x-powered-by");
 
+// Stripe webhook requires the raw request body for signature verification.
+// It must be mounted before express.json() so the body stays unparsed.
+app.use(
+    "/api/payments/stripe/webhook",
+    express.raw({ type: "*/*" }),
+    stripeWebhook,
+);
+
 app.use(express.json({ limit: "16kb" }));
 app.use(express.urlencoded({ extended: false, limit: "16kb" }));
+
+// Stripe checkout session creation/status (authenticated, JSON body).
+app.use("/api/payments/stripe", stripeSessionRoutes);
+app.use("/api/payments/bkash", bkashRoutes);
 
 // Serve uploaded profile pictures.
 app.use(

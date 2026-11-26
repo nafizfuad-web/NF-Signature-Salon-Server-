@@ -5,12 +5,16 @@
 
 import type { Response } from "express";
 import Appointment from "../models/Appointment";
+import User from "../models/User";
 import Transaction, {
     ACTIVE_PAYMENT_STATUSES,
+    PAYMENT_STATUSES,
     SETTLED_PAYMENT_STATUSES,
+    type PaymentStatus,
     type TransactionFields,
 } from "../models/Transaction";
 import type { AuthRequest } from "../middleware/authMiddleware";
+import { isPaymentMethodId } from "../config/payment";
 import { formatAppointment, formatTransaction } from "../lib/serializers";
 import {
     isPaymentStateError,
@@ -30,6 +34,10 @@ function logFailure(action: string, error: unknown): void {
     });
 }
 
+function escapeRegex(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 export async function listAdminPayments(
     req: AuthRequest,
     res: Response,
@@ -39,17 +47,92 @@ export async function listAdminPayments(
             fail(res, 401, "Please sign in to continue.");
             return;
         }
+
         const limit = Math.min(
             Math.max(Number(req.query.limit) || 100, 1),
             200,
         );
-        const transactions = (await Transaction.find({
-            environment: "TEST",
-            simulated: true,
-        })
+        const method = req.query.method;
+        const status = req.query.status;
+        const search = typeof req.query.q === "string" ? req.query.q.trim() : "";
+
+        const filter: Record<string, unknown> = { environment: "TEST" };
+        if (isPaymentMethodId(method)) {
+            filter.paymentMethod = method;
+        }
+        if (
+            typeof status === "string" &&
+            (PAYMENT_STATUSES as readonly string[]).includes(status)
+        ) {
+            filter.paymentStatus = status as PaymentStatus;
+        }
+        if (search) {
+            const pattern = new RegExp(escapeRegex(search), "i");
+            filter.$or = [
+                { serviceTitle: pattern },
+                { providerReference: pattern },
+                { providerSessionId: pattern },
+                { providerPaymentIntentId: pattern },
+            ];
+        }
+
+        const transactions = (await Transaction.find(filter)
             .sort({ createdAt: -1 })
             .limit(limit)
             .lean()) as unknown as TransactionLean[];
+
+        const appointmentIds = [
+            ...new Set(transactions.map((item) => String(item.appointment))),
+        ];
+        const customerIds = [
+            ...new Set(transactions.map((item) => String(item.customer))),
+        ];
+        const [appointments, customers] = await Promise.all([
+            appointmentIds.length
+                ? Appointment.find({ _id: { $in: appointmentIds } })
+                      .select("status customerName customerEmail customerPhone staffName")
+                      .lean()
+                : [],
+            customerIds.length
+                ? User.find({ _id: { $in: customerIds } })
+                      .select("name email phone")
+                      .lean()
+                : [],
+        ]);
+        const appointmentById = new Map(
+            appointments.map((item) => [String(item._id), item]),
+        );
+        const customerById = new Map(
+            customers.map((item) => [String(item._id), item]),
+        );
+
+        const enriched = transactions.map((transaction) => {
+            const appointment = appointmentById.get(String(transaction.appointment));
+            const customer = customerById.get(String(transaction.customer));
+            return {
+                ...formatTransaction(transaction),
+                customerName:
+                    customer?.name ??
+                    (appointment && "customerName" in appointment
+                        ? appointment.customerName
+                        : undefined),
+                customerEmail:
+                    customer?.email ??
+                    (appointment && "customerEmail" in appointment
+                        ? appointment.customerEmail
+                        : undefined),
+                customerPhone:
+                    customer?.phone ??
+                    (appointment && "customerPhone" in appointment
+                        ? appointment.customerPhone
+                        : undefined),
+                appointmentStatus: appointment?.status,
+                staffName:
+                    appointment && "staffName" in appointment
+                        ? appointment.staffName
+                        : undefined,
+            };
+        });
 
         const byStatus: Record<string, number> = {};
         let settledCount = 0;
@@ -70,7 +153,7 @@ export async function listAdminPayments(
         res.status(200).json({
             success: true,
             data: {
-                scope: "TEST_SIMULATED",
+                scope: "TEST",
                 stats: {
                     transactionCount: transactions.length,
                     byStatus,
@@ -79,14 +162,12 @@ export async function listAdminPayments(
                     currency: "BDT",
                     realRevenueAmount: 0,
                 },
-                transactions: transactions.map((transaction) =>
-                    formatTransaction(transaction),
-                ),
+                transactions: enriched,
             },
         });
     } catch (error) {
         logFailure("Admin payments lookup failed.", error);
-        fail(res, 500, "Unable to load TEST payments right now.");
+        fail(res, 500, "Unable to load payments right now.");
     }
 }
 

@@ -1,7 +1,7 @@
 
-import mongoose, { Schema, type Model } from "mongoose";
+import mongoose, { Schema, type Model, type Types } from "mongoose";
 
-interface UserFields {
+export interface UserFields {
     name: string;
     email: string;
     phone?: string;
@@ -9,6 +9,17 @@ interface UserFields {
     passwordHash?: string;
     googleId?: string;
     role: "customer" | "admin";
+    isBlocked: boolean;
+    blockedAt?: Date;
+    blockedBy?: Types.ObjectId;
+    blockReason?: string;
+    emailVerified: boolean;
+    emailVerificationTokenHash?: string;
+    emailVerificationExpiresAt?: Date;
+    passwordResetTokenHash?: string;
+    passwordResetExpiresAt?: Date;
+    tokenVersion: number;
+    lastLoginAt?: Date;
 }
 
 const userSchema = new Schema<UserFields>(
@@ -53,6 +64,52 @@ const userSchema = new Schema<UserFields>(
             type: String,
             enum: ["customer", "admin"],
             default: "customer",
+            index: true,
+        },
+        isBlocked: {
+            type: Boolean,
+            default: false,
+            index: true,
+        },
+        blockedAt: {
+            type: Date,
+        },
+        blockedBy: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
+        },
+        blockReason: {
+            type: String,
+            trim: true,
+            maxlength: 300,
+        },
+        emailVerified: {
+            type: Boolean,
+            default: false,
+        },
+        emailVerificationTokenHash: {
+            type: String,
+            select: false,
+        },
+        emailVerificationExpiresAt: {
+            type: Date,
+            select: false,
+        },
+        passwordResetTokenHash: {
+            type: String,
+            select: false,
+        },
+        passwordResetExpiresAt: {
+            type: Date,
+            select: false,
+        },
+        tokenVersion: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+        lastLoginAt: {
+            type: Date,
         },
     },
     {

@@ -330,6 +330,7 @@ export async function completeGoogleAuth(
                 }
 
                 existingEmail.googleId = identity.sub;
+                existingEmail.emailVerified = true;
 
                 if (!existingEmail.avatarUrl && identity.picture) {
                     existingEmail.avatarUrl = identity.picture;
@@ -344,6 +345,7 @@ export async function completeGoogleAuth(
                         email,
                         googleId: identity.sub,
                         role: "customer",
+                        emailVerified: true,
                         ...(identity.picture
                             ? { avatarUrl: identity.picture }
                             : {}),
@@ -368,9 +370,26 @@ export async function completeGoogleAuth(
             }
         }
 
+        if (user.isBlocked) {
+            sendPopupResult(res, 403, {
+                type: "nf-signature-auth",
+                error:
+                    "This account has been blocked. Please contact the salon team for help.",
+            });
+            return;
+        }
+
+        await User.updateOne(
+            { _id: user._id },
+            { $set: { lastLoginAt: new Date() } },
+        );
+
         sendPopupResult(res, 200, {
             type: "nf-signature-auth",
-            token: createToken(String(user._id)),
+            token: createToken(
+                String(user._id),
+                user.tokenVersion ?? 0,
+            ),
             user: formatUser(user),
         });
     } catch (error) {

@@ -6,6 +6,7 @@
 import type { Response } from "express";
 import mongoose, { type ClientSession, type Types } from "mongoose";
 import Appointment from "../models/Appointment";
+import Service from "../models/Service";
 import Transaction, {
     ACTIVE_PAYMENT_STATUSES,
     type TransactionFields,
@@ -15,10 +16,12 @@ import {
     getPaymentConfig,
     getPaymentMethodsPayload,
     isPaymentMethodId,
+    isSimulatedPaymentMethod,
     type PaymentMethodId,
 } from "../config/payment";
 import { formatAppointment, formatTransaction } from "../lib/serializers";
 import {
+    canSimulateTransaction,
     isPaymentStateError,
     settleTransactionFailure,
     settleTransactionSuccess,
@@ -96,10 +99,6 @@ export async function createPaymentSession(
         const config = requireEnabledPayment(res);
         if (!config) return;
         const demoAmount = config.amount;
-        if (demoAmount === null) {
-            fail(res, 503, "TEST demo amount is not configured.");
-            return;
-        }
 
         const appointmentId = req.params.appointmentId;
         if (!isValidObjectId(appointmentId)) {
@@ -111,6 +110,10 @@ export async function createPaymentSession(
         const method = body?.method;
         if (!isPaymentMethodId(method)) {
             fail(res, 400, "Select a valid TEST payment method.");
+            return;
+        }
+        if (!isSimulatedPaymentMethod(method) && method !== "pay_at_salon") {
+            fail(res, 400, "Use the provider checkout flow for this payment method.");
             return;
         }
 
@@ -141,6 +144,24 @@ export async function createPaymentSession(
             return;
         }
 
+        let amount = demoAmount ?? 0;
+        let amountBasis: "configured_test_demo" | "service_price" =
+            "configured_test_demo";
+        if (method === "pay_at_salon") {
+            amount = appointment.priceAmount ?? 0;
+            if (!amount && appointment.service) {
+                const service = (await Service.findById(appointment.service)
+                    .select("priceAmount")
+                    .lean()) as { priceAmount?: number } | null;
+                amount = service?.priceAmount ?? 0;
+            }
+            amountBasis = "service_price";
+        }
+        if (!Number.isInteger(amount) || amount < 1) {
+            fail(res, 409, "This appointment has no chargeable amount.");
+            return;
+        }
+
         const transactionData: TransactionFields = {
             appointment: appointment._id,
             customer: appointment.customer,
@@ -149,9 +170,9 @@ export async function createPaymentSession(
             appointmentDate: appointment.date,
             appointmentTime: appointment.time,
             ...(appointment.price ? { displayPrice: appointment.price } : {}),
-            amount: demoAmount,
+            amount,
             currency: "BDT",
-            amountBasis: "configured_test_demo",
+            amountBasis,
             paymentMethod: method,
             provider: method === "pay_at_salon" ? "salon_cash" : "internal_simulator",
             providerReference: `demo_${method}_${new mongoose.Types.ObjectId().toHexString()}`,
@@ -353,6 +374,10 @@ export async function simulatePayment(
             | null;
         if (!existing || String(existing.customer) !== req.userId) {
             fail(res, 404, "We could not find that payment.");
+            return;
+        }
+        if (!canSimulateTransaction(existing)) {
+            fail(res, 409, "This payment cannot be simulated.");
             return;
         }
 

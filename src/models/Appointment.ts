@@ -26,6 +26,8 @@ export interface AppointmentFields {
     duration?: string;
     durationMinutes: number;
     price?: string;
+    /** Denormalized BDT amount captured at booking time for payments. */
+    priceAmount?: number;
     date: string;
     time: string;
     startMinutes: number;
@@ -82,6 +84,11 @@ const appointmentSchema = new Schema<AppointmentFields>(
             type: String,
             trim: true,
             maxlength: 40,
+        },
+        priceAmount: {
+            type: Number,
+            min: 1,
+            max: 10_000_000,
         },
         date: {
             type: String,

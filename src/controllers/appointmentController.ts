@@ -4,7 +4,10 @@
 // never create an overlapping, past, out-of-hours or duplicate appointment.
 
 import type { Response } from "express";
-import Appointment from "../models/Appointment";
+import Appointment, {
+    APPOINTMENT_STATUSES,
+    type AppointmentStatus,
+} from "../models/Appointment";
 import Service from "../models/Service";
 import Transaction, { ACTIVE_PAYMENT_STATUSES } from "../models/Transaction";
 import User from "../models/User";
@@ -220,6 +223,7 @@ export async function createAppointment(req: AuthRequest, res: Response): Promis
                 ...(service.duration ? { duration: service.duration } : {}),
                 durationMinutes,
                 ...(service.price ? { price: service.price } : {}),
+                ...(service.priceAmount ? { priceAmount: service.priceAmount } : {}),
                 date,
                 time: slot.label,
                 startMinutes: slot.startMinutes,
@@ -307,5 +311,120 @@ export async function cancelAppointment(req: AuthRequest, res: Response): Promis
     } catch (error) {
         logFailure("Appointment cancellation failed.", error);
         fail(res, 500, "Unable to cancel this appointment right now.");
+    }
+}
+
+const ADMIN_APPOINTMENT_TRANSITIONS: Record<
+    AppointmentStatus,
+    AppointmentStatus[]
+> = {
+    pending: ["confirmed", "cancelled"],
+    confirmed: ["completed", "cancelled"],
+    completed: [],
+    cancelled: [],
+};
+
+export async function listAdminAppointments(
+    req: AuthRequest,
+    res: Response,
+): Promise<void> {
+    try {
+        if (!req.userId) {
+            fail(res, 401, "Please sign in to continue.");
+            return;
+        }
+        const appointments = await Appointment.find({})
+            .sort({ date: -1, startMinutes: -1 })
+            .limit(300)
+            .lean();
+        res.status(200).json({
+            success: true,
+            data: appointments.map((appointment) => formatAppointment(appointment)),
+        });
+    } catch (error) {
+        logFailure("Admin appointments lookup failed.", error);
+        fail(res, 500, "Unable to load bookings right now.");
+    }
+}
+
+export async function updateAdminAppointmentStatus(
+    req: AuthRequest,
+    res: Response,
+): Promise<void> {
+    try {
+        if (!req.userId) {
+            fail(res, 401, "Please sign in to continue.");
+            return;
+        }
+        const appointmentId = req.params.id;
+        if (!isValidObjectId(appointmentId)) {
+            fail(res, 404, "We could not find that appointment.");
+            return;
+        }
+        const body = asRecord(req.body);
+        const nextStatus = body?.status;
+        if (
+            typeof nextStatus !== "string" ||
+            !(APPOINTMENT_STATUSES as readonly string[]).includes(nextStatus)
+        ) {
+            fail(res, 400, "Choose a valid appointment status.");
+            return;
+        }
+
+        const appointment = await Appointment.findById(appointmentId);
+        if (!appointment) {
+            fail(res, 404, "We could not find that appointment.");
+            return;
+        }
+        const currentStatus = appointment.status as AppointmentStatus;
+        const targetStatus = nextStatus as AppointmentStatus;
+        if (currentStatus === targetStatus) {
+            res.status(200).json({
+                success: true,
+                idempotentReplay: true,
+                data: formatAppointment(appointment),
+            });
+            return;
+        }
+        if (!ADMIN_APPOINTMENT_TRANSITIONS[currentStatus].includes(targetStatus)) {
+            fail(res, 409, "That appointment status cannot be changed that way.");
+            return;
+        }
+
+        if (targetStatus === "cancelled") {
+            if ((appointment.paymentStatus ?? "unpaid") !== "unpaid") {
+                fail(res, 409, "Paid or in-progress payments must be resolved before cancellation.");
+                return;
+            }
+            const activePayment = await Transaction.exists({
+                appointment: appointment._id,
+                paymentStatus: { $in: [...ACTIVE_PAYMENT_STATUSES] },
+            });
+            if (activePayment) {
+                fail(res, 409, "This appointment has a payment in progress and cannot be cancelled.");
+                return;
+            }
+        }
+
+        if (
+            targetStatus === "completed" &&
+            appointment.priceAmount != null &&
+            (appointment.paymentStatus ?? "unpaid") !== "paid"
+        ) {
+            fail(res, 409, "Only paid appointments can be marked completed.");
+            return;
+        }
+
+        appointment.status = targetStatus;
+        await appointment.save();
+
+        res.status(200).json({
+            success: true,
+            idempotentReplay: false,
+            data: formatAppointment(appointment),
+        });
+    } catch (error) {
+        logFailure("Admin appointment status update failed.", error);
+        fail(res, 500, "Unable to update this booking right now.");
     }
 }

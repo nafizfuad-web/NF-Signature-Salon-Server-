@@ -6,6 +6,11 @@ import {
     login,
     getMe,
     logout,
+    forgotPassword,
+    resetPassword,
+    verifyEmail,
+    resendVerification,
+    resendVerificationByEmail,
 } from "../controllers/authController";
 import {
     completeGoogleAuth,
@@ -41,14 +46,41 @@ const googleRateLimit = createAuthRateLimit(
     "Too many Google sign-in attempts. Please wait and try again."
 );
 
+// Password-reset and verification emails are rate-limited on every request
+// (successful requests must also count) to prevent inbox flooding.
+const emailActionRateLimit = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 6,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+        success: false,
+        message: "Too many requests. Please wait and try again.",
+    },
+});
+
 // Public routes
 router.post("/register", registerRateLimit, register);
 router.post("/login", loginRateLimit, login);
+router.post("/forgot-password", emailActionRateLimit, forgotPassword);
+router.post("/reset-password", emailActionRateLimit, resetPassword);
+router.post("/verify-email", emailActionRateLimit, verifyEmail);
+router.post(
+    "/resend-verification-email",
+    emailActionRateLimit,
+    resendVerificationByEmail,
+);
 router.get("/google", googleRateLimit, startGoogleAuth);
 router.get("/google/callback", completeGoogleAuth);
 
 // Protected routes
 router.get("/me", protect, getMe);
 router.post("/logout", protect, logout);
+router.post(
+    "/resend-verification",
+    protect,
+    emailActionRateLimit,
+    resendVerification,
+);
 
 export default router;

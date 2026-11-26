@@ -9,6 +9,7 @@ export const PAYMENT_STATUSES = [
     "cancelled",
     "cash_pending",
     "cash_received",
+    "refunded",
 ] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
@@ -26,6 +27,7 @@ export const SETTLED_PAYMENT_STATUSES = [
 export const TERMINAL_PAYMENT_STATUSES = [
     "failed",
     "cancelled",
+    "refunded",
 ] as const satisfies readonly PaymentStatus[];
 
 export const SETTLEMENT_STATES = [
@@ -39,6 +41,21 @@ export type SettlementState = (typeof SETTLEMENT_STATES)[number];
 export const SIMULATION_OUTCOMES = ["success", "failed", "cancelled"] as const;
 export type SimulationOutcome = (typeof SIMULATION_OUTCOMES)[number];
 
+export const PAYMENT_PROVIDERS = [
+    "internal_simulator",
+    "salon_cash",
+    "stripe",
+    "bkash",
+    "nagad",
+] as const;
+export type PaymentProvider = (typeof PAYMENT_PROVIDERS)[number];
+
+export const AMOUNT_BASES = [
+    "configured_test_demo",
+    "service_price",
+] as const;
+export type AmountBasis = (typeof AMOUNT_BASES)[number];
+
 export interface TransactionFields {
     appointment: Types.ObjectId;
     customer: Types.ObjectId;
@@ -49,10 +66,15 @@ export interface TransactionFields {
     displayPrice?: string;
     amount: number;
     currency: "BDT";
-    amountBasis: "configured_test_demo";
+    amountBasis: AmountBasis;
     paymentMethod: PaymentMethodId;
-    provider: "internal_simulator" | "salon_cash";
+    provider: PaymentProvider;
     providerReference: string;
+    providerSessionId?: string;
+    providerPaymentIntentId?: string;
+    providerEventId?: string;
+    checkoutUrl?: string;
+    providerVerifiedAt?: Date;
     paymentStatus: PaymentStatus;
     environment: "TEST" | "LIVE";
     simulated: boolean;
@@ -70,6 +92,10 @@ export interface TransactionFields {
     lastReconcileError?: string;
     cashConfirmedBy?: Types.ObjectId;
     cashConfirmedAt?: Date;
+    refundedAmount?: number;
+    refundedAt?: Date;
+    refundedBy?: Types.ObjectId;
+    refundReason?: string;
     paidAt?: Date;
     activeAppointmentId?: Types.ObjectId;
     settledAppointmentId?: Types.ObjectId;
@@ -126,7 +152,7 @@ const transactionSchema = new Schema<TransactionFields>(
         },
         amountBasis: {
             type: String,
-            enum: ["configured_test_demo"],
+            enum: AMOUNT_BASES,
             required: true,
         },
         paymentMethod: {
@@ -136,7 +162,7 @@ const transactionSchema = new Schema<TransactionFields>(
         },
         provider: {
             type: String,
-            enum: ["internal_simulator", "salon_cash"],
+            enum: PAYMENT_PROVIDERS,
             required: true,
         },
         providerReference: {
@@ -144,7 +170,30 @@ const transactionSchema = new Schema<TransactionFields>(
             required: true,
             unique: true,
             trim: true,
-            maxlength: 120,
+            maxlength: 160,
+        },
+        providerSessionId: {
+            type: String,
+            trim: true,
+            maxlength: 200,
+        },
+        providerPaymentIntentId: {
+            type: String,
+            trim: true,
+            maxlength: 200,
+        },
+        providerEventId: {
+            type: String,
+            trim: true,
+            maxlength: 200,
+        },
+        checkoutUrl: {
+            type: String,
+            trim: true,
+            maxlength: 2000,
+        },
+        providerVerifiedAt: {
+            type: Date,
         },
         paymentStatus: {
             type: String,
@@ -161,7 +210,7 @@ const transactionSchema = new Schema<TransactionFields>(
         simulated: {
             type: Boolean,
             required: true,
-            default: true,
+            default: false,
         },
         simulationOutcome: {
             type: String,
@@ -170,7 +219,7 @@ const transactionSchema = new Schema<TransactionFields>(
         failureReason: {
             type: String,
             trim: true,
-            maxlength: 200,
+            maxlength: 300,
         },
         settlementState: {
             type: String,
@@ -194,7 +243,7 @@ const transactionSchema = new Schema<TransactionFields>(
         lastSettlementError: {
             type: String,
             trim: true,
-            maxlength: 200,
+            maxlength: 300,
         },
         reconcileClaimedBy: {
             type: String,
@@ -215,7 +264,7 @@ const transactionSchema = new Schema<TransactionFields>(
         lastReconcileError: {
             type: String,
             trim: true,
-            maxlength: 200,
+            maxlength: 300,
         },
         cashConfirmedBy: {
             type: Schema.Types.ObjectId,
@@ -223,6 +272,22 @@ const transactionSchema = new Schema<TransactionFields>(
         },
         cashConfirmedAt: {
             type: Date,
+        },
+        refundedAmount: {
+            type: Number,
+            min: 0,
+        },
+        refundedAt: {
+            type: Date,
+        },
+        refundedBy: {
+            type: Schema.Types.ObjectId,
+            ref: "User",
+        },
+        refundReason: {
+            type: String,
+            trim: true,
+            maxlength: 300,
         },
         paidAt: {
             type: Date,
@@ -243,6 +308,7 @@ transactionSchema.index({ appointment: 1, createdAt: -1 });
 transactionSchema.index({ customer: 1, createdAt: -1 });
 transactionSchema.index({ environment: 1, paymentStatus: 1 });
 transactionSchema.index({ paymentMethod: 1, paymentStatus: 1 });
+transactionSchema.index({ provider: 1, paymentStatus: 1 });
 transactionSchema.index({ settlementState: 1, settlementStartedAt: 1 });
 transactionSchema.index({ reconcileLeaseUntil: 1 });
 transactionSchema.index(

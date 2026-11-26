@@ -37,7 +37,9 @@ assert.equal(isPaymentMethodId("stripe_demo"), true);
 assert.equal(isPaymentMethodId("bkash_demo"), true);
 assert.equal(isPaymentMethodId("nagad_demo"), true);
 assert.equal(isPaymentMethodId("pay_at_salon"), true);
-assert.equal(isPaymentMethodId("stripe"), false);
+assert.equal(isPaymentMethodId("stripe"), true);
+assert.equal(isPaymentMethodId("bkash"), true);
+assert.equal(isPaymentMethodId("nagad"), true);
 assert.equal(isPaymentMethodId("cash"), false);
 assert.equal(isPaymentMethodId(""), false);
 
@@ -56,10 +58,20 @@ withEnv(
         assert.equal(config.currency, "BDT");
         const payload = getPaymentMethodsPayload("nf_signature_salon_test");
         assert.equal(payload.enabled, true);
-        assert.equal(payload.simulated, true);
         assert.equal(payload.environment, "TEST");
-        assert.equal(payload.methods.length, 4);
-        assert.equal(payload.methods.every((m) => m.simulated && m.environment === "TEST"), true);
+        assert.equal(payload.methods.length, 7);
+        const available = payload.methods.filter((method) => method.available);
+        assert.equal(available.length, 4);
+        assert.equal(
+            available
+                .filter((method) => method.id.endsWith("_demo"))
+                .every((method) => method.simulated && method.environment === "TEST"),
+            true,
+        );
+        assert.equal(
+            available.find((method) => method.id === "pay_at_salon")?.mode,
+            "cash",
+        );
         assert.equal(payload.methods.some((m) => m.requiresSimulation), true);
     },
 );
@@ -75,7 +87,9 @@ withEnv(
         const config = getPaymentConfig("nf_signature_salon_test");
         assert.equal(config.enabled, false);
         assert.equal(config.reason, "disabled_in_production");
-        assert.equal(getPaymentMethodsPayload("nf_signature_salon_test").methods.length, 0);
+        const payload = getPaymentMethodsPayload("nf_signature_salon_test");
+        assert.equal(payload.enabled, false);
+        assert.equal(payload.methods.some((method) => method.available), false);
     },
 );
 

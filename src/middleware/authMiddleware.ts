@@ -7,6 +7,7 @@ import { getServerConfig } from "../config/env";
 export interface AuthRequest extends Request {
     userId?: string;
     userRole?: "customer" | "admin";
+    userEmail?: string;
 }
 
 export const protect = async (
@@ -33,6 +34,7 @@ export const protect = async (
     }
 
     let userId: string;
+    let tokenVersion: number;
     try {
         const decoded = jwt.verify(token, secret, { algorithms: ["HS256"] });
 
@@ -45,6 +47,8 @@ export const protect = async (
         }
 
         userId = decoded.userId;
+        tokenVersion =
+            typeof decoded.tokenVersion === "number" ? decoded.tokenVersion : 0;
     } catch {
         return res.status(401).json({
             success: false,
@@ -52,7 +56,9 @@ export const protect = async (
         });
     }
 
-    const user = await User.findById(userId).select("_id role");
+    const user = await User.findById(userId).select(
+        "_id role email isBlocked tokenVersion",
+    );
     if (!user) {
         return res.status(401).json({
             success: false,
@@ -60,8 +66,25 @@ export const protect = async (
         });
     }
 
+    if ((user.tokenVersion ?? 0) !== tokenVersion) {
+        return res.status(401).json({
+            success: false,
+            message: "Session expired. Please sign in again.",
+        });
+    }
+
+    if (user.isBlocked) {
+        return res.status(403).json({
+            success: false,
+            code: "account_blocked",
+            message:
+                "This account has been blocked. Please contact the salon team for help.",
+        });
+    }
+
     req.userId = String(user._id);
     req.userRole = user.role;
+    req.userEmail = user.email;
     return next();
 };
 
