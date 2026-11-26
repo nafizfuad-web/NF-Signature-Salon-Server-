@@ -11,6 +11,7 @@ import {
     verifyEmail,
     resendVerification,
     resendVerificationByEmail,
+    changePassword,
 } from "../controllers/authController";
 import {
     completeGoogleAuth,
@@ -59,6 +60,10 @@ const emailActionRateLimit = rateLimit({
     },
 });
 
+const passwordChangeRateLimit = createAuthRateLimit(
+    "Too many password change attempts. Please wait and try again.",
+);
+
 // Public routes
 router.post("/register", registerRateLimit, register);
 router.post("/login", loginRateLimit, login);
@@ -76,6 +81,12 @@ router.get("/google/callback", completeGoogleAuth);
 // Protected routes
 router.get("/me", protect, getMe);
 router.post("/logout", protect, logout);
+router.post(
+    "/change-password",
+    protect,
+    passwordChangeRateLimit,
+    changePassword,
+);
 router.post(
     "/resend-verification",
     protect,

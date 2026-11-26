@@ -635,6 +635,67 @@ export const resendVerificationByEmail = async (req: Request, res: Response) => 
     }
 };
 
+// CHANGE PASSWORD (signed-in)
+export const changePassword = async (req: AuthRequest, res: Response) => {
+    try {
+        if (!req.userId) {
+            return res.status(401).json({
+                success: false,
+                message: "Please sign in to continue.",
+            });
+        }
+        const body = getRequestBody(req.body);
+        const currentPassword = body?.currentPassword;
+        const newPassword = body?.newPassword;
+        if (
+            typeof currentPassword !== "string" ||
+            !currentPassword ||
+            typeof newPassword !== "string" ||
+            !validPassword(newPassword)
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Current password is required and the new password must be 8-72 bytes containing a letter and a number.",
+            });
+        }
+
+        const user = await User.findById(req.userId).select("+passwordHash");
+        if (!user?.passwordHash) {
+            return res.status(409).json({
+                success: false,
+                message:
+                    "This account does not have a password. Use the sign-in method originally used to create it.",
+            });
+        }
+
+        const matches = await bcrypt.compare(currentPassword, user.passwordHash);
+        if (!matches) {
+            return res.status(401).json({
+                success: false,
+                message: "The current password is incorrect.",
+            });
+        }
+
+        user.passwordHash = await bcrypt.hash(newPassword, 12);
+        user.tokenVersion = (user.tokenVersion ?? 0) + 1;
+        await user.save();
+
+        const token = createToken(String(user._id), user.tokenVersion);
+        return res.status(200).json({
+            success: true,
+            token,
+            user: formatUser(user),
+        });
+    } catch (error) {
+        logAuthError("Change password failed.", error);
+        return res.status(500).json({
+            success: false,
+            message: "Unable to change your password right now.",
+        });
+    }
+};
+
 // RESEND VERIFICATION (signed-in)
 export const resendVerification = async (req: AuthRequest, res: Response) => {
     try {

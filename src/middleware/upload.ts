@@ -12,8 +12,10 @@ import multer from "multer";
 
 export const UPLOAD_ROOT = path.resolve(__dirname, "../../uploads");
 export const AVATAR_DIR = path.join(UPLOAD_ROOT, "avatars");
+export const SERVICE_IMAGE_DIR = path.join(UPLOAD_ROOT, "services");
 
 fs.mkdirSync(AVATAR_DIR, { recursive: true });
+fs.mkdirSync(SERVICE_IMAGE_DIR, { recursive: true });
 
 const ALLOWED_IMAGE_TYPES: Record<string, string> = {
     "image/jpeg": ".jpg",
@@ -68,6 +70,49 @@ export function handleAvatarUpload(
                   ? error.message
                   : "The image upload could not be completed.";
 
+        res.status(400).json({ success: false, message });
+    });
+}
+
+const serviceImageUpload = multer({
+    storage: multer.diskStorage({
+        destination: (_req, _file, callback) => callback(null, SERVICE_IMAGE_DIR),
+        filename: (_req, file, callback) => {
+            const extension = ALLOWED_IMAGE_TYPES[file.mimetype] ?? ".jpg";
+            callback(
+                null,
+                `service-${Date.now()}-${crypto.randomBytes(8).toString("hex")}${extension}`,
+            );
+        },
+    }),
+    limits: { fileSize: 5 * 1024 * 1024, files: 1 },
+    fileFilter: (_req, file, callback) => {
+        if (!Object.prototype.hasOwnProperty.call(ALLOWED_IMAGE_TYPES, file.mimetype)) {
+            callback(new Error("Please upload a JPG, PNG, WEBP or GIF image."));
+            return;
+        }
+        callback(null, true);
+    },
+});
+
+export function handleServiceImageUpload(
+    req: Request,
+    res: Response,
+    next: NextFunction,
+): void {
+    serviceImageUpload.single("image")(req, res, (error: unknown) => {
+        if (!error) {
+            next();
+            return;
+        }
+        const message =
+            error instanceof multer.MulterError
+                ? error.code === "LIMIT_FILE_SIZE"
+                    ? "The image must be 5 MB or smaller."
+                    : "The image upload could not be completed."
+                : error instanceof Error
+                  ? error.message
+                  : "The image upload could not be completed.";
         res.status(400).json({ success: false, message });
     });
 }
